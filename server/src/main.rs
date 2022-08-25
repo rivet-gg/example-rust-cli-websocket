@@ -27,8 +27,7 @@ async fn main() -> Result<()> {
     println!("Lobby ready");
 
     // Create the event loop and TCP listener we'll accept connections on.
-    let try_socket = TcpListener::bind(("0.0.0.0", port)).await;
-    let listener = try_socket.context("failed to bind")?;
+    let listener = TcpListener::bind(("0.0.0.0", port)).await?;
     println!("Listening on {}", port);
 
     while let Ok((stream, _)) = listener.accept().await {
@@ -39,23 +38,19 @@ async fn main() -> Result<()> {
 }
 
 async fn accept_connection(stream: TcpStream) -> Result<()> {
-    let addr = stream
-        .peer_addr()
-        .context("connected streams should have a peer address")?;
-    println!("Peer address: {}", addr);
+    let addr = stream.peer_addr()?;
+    let ws_stream = tokio_tungstenite::accept_async(stream).await?;
 
-    let ws_stream = tokio_tungstenite::accept_async(stream)
-        .await
-        .context("error during the websocket handshake occurred")?;
-
-    println!("New WebSocket connection: {}", addr);
+    println!("{addr}: Connected");
 
     let (write, read) = ws_stream.split();
     // We should not forward messages other than text or binary.
     read.try_filter(|msg| future::ready(msg.is_text() || msg.is_binary()))
+        .inspect(|msg| println!("{addr}: {msg:?}"))
         .forward(write)
-        .await
-        .context("Failed to forward messages")?;
+        .await?;
+
+    println!("{addr}: Disconnected");
 
     Ok(())
 }
