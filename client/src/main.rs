@@ -4,7 +4,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     FutureExt, Sink, SinkExt, StreamExt, TryStreamExt,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 type MyWebSocketStream = WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     println!("Sending player token {player_token}");
     write.send(Message::text(player_token)).await?;
 
-    // Build input/ouptut futures
+    // Build input/output futures
     let read_stdin_fut = read_stdin(write);
     let write_stdout_fut = write_stdout(read);
 
@@ -74,19 +74,11 @@ async fn main() -> Result<()> {
 }
 
 async fn read_stdin(mut sink: SplitSink<MyWebSocketStream, Message>) -> Result<()> {
-    let mut stdin = tokio::io::stdin();
-    loop {
-        let mut buf = vec![0; 1024];
-        let n = match stdin.read(&mut buf).await {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(err) => {
-                return Err(err.into());
-            }
-        };
-        buf.truncate(n);
-        let str = String::from_utf8(buf)?;
-        sink.send(Message::text(str)).await?;
+    let stdin = tokio::io::stdin();
+    let reader = tokio::io::BufReader::new(stdin);
+    let mut lines = reader.lines();
+    while let Some(line) = lines.next_line().await? {
+        sink.send(Message::text(line)).await?;
     }
 
     println!("stdin closed");
