@@ -76,7 +76,8 @@ async fn read_stdin(mut sink: SplitSink<MyWebSocketStream, Message>) -> Result<(
             }
         };
         buf.truncate(n);
-        sink.send(Message::binary(buf)).await?;
+        let str = String::from_utf8(buf)?;
+        sink.send(Message::text(str)).await?;
     }
 
     println!("stdin closed");
