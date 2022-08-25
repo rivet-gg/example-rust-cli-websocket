@@ -252,6 +252,7 @@ name = "example-rivet-barebones-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aws-smithy-client",
  "dotenv",
  "futures-util",
  "rivet-matchmaker",
