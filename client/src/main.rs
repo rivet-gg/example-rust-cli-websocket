@@ -1,10 +1,15 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use futures_util::{
     future::Either as FutureEither,
     stream::{SplitSink, SplitStream},
     FutureExt, Sink, SinkExt, StreamExt, TryStreamExt,
 };
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt},
+    sync::{broadcast, Notify},
+};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 type MyWebSocketStream = WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -59,39 +64,71 @@ async fn main() -> Result<()> {
     write.send(Message::text(player_token)).await?;
 
     // Build input/output futures
-    let read_stdin_fut = read_stdin(write);
-    let write_stdout_fut = write_stdout(read);
+    let notify = Arc::new(Notify::new());
+    let listen_ctrl_c_wait = tokio::spawn(listen_ctrl_c(notify.clone()));
+    let read_stdin_fut = tokio::spawn(read_stdin(write, notify.clone()));
+    let write_stdout_fut = tokio::spawn(write_stdout(read, notify.clone()));
 
-    // Wait for input to close or socket to close
-    futures_util::pin_mut!(read_stdin_fut, write_stdout_fut);
-    match futures_util::future::try_select(read_stdin_fut, write_stdout_fut).await {
-        Ok(_) => Ok(()),
-        Err(x) => match x {
-            FutureEither::Left((err, _)) => Err(err),
-            FutureEither::Right((err, _)) => Err(err),
-        },
-    }
-}
-
-async fn read_stdin(mut sink: SplitSink<MyWebSocketStream, Message>) -> Result<()> {
-    let stdin = tokio::io::stdin();
-    let reader = tokio::io::BufReader::new(stdin);
-    let mut lines = reader.lines();
-    while let Some(line) = lines.next_line().await? {
-        sink.send(Message::text(line)).await?;
-    }
-
-    println!("stdin closed");
+    // Wait for any future to finish/exit
+    futures_util::future::select_all([listen_ctrl_c_wait, read_stdin_fut, write_stdout_fut]).await;
+    println!("Shutting down");
+    notify.notify_waiters();
 
     Ok(())
 }
 
-async fn write_stdout(mut stream: SplitStream<MyWebSocketStream>) -> Result<()> {
-    while let Some(msg) = stream.try_next().await? {
-        println!("Message: {:?}", msg);
+async fn listen_ctrl_c(notify: Arc<Notify>) -> Result<()> {
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = notify.notified() => {}
+    }
+    Ok(())
+}
+
+async fn read_stdin(
+    mut sink: SplitSink<MyWebSocketStream, Message>,
+    notify: Arc<Notify>,
+) -> Result<()> {
+    let stdin = tokio::io::stdin();
+    let reader = tokio::io::BufReader::new(stdin);
+    let mut lines = reader.lines();
+    loop {
+        tokio::select! {
+            res = lines.next_line() => {
+                if let Some(line) = res? {
+                    sink.send(Message::text(line)).await?;
+                } else {
+                    println!("No more lines");
+                    break;
+                }
+            }
+            _ = notify.notified() => {
+                break;
+            }
+        }
     }
 
-    println!("Socket closed");
+    Ok(())
+}
+async fn write_stdout(
+    mut stream: SplitStream<MyWebSocketStream>,
+    notify: Arc<Notify>,
+) -> Result<()> {
+    loop {
+        tokio::select! {
+            res = stream.try_next() => {
+                if let Some(msg) = res? {
+                    println!("Message: {:?}", msg);
+                } else {
+                    println!("Socket closed");
+                    break;
+                }
+            }
+            _ = notify.notified() => {
+                break;
+            }
+        }
+    }
 
     Ok(())
 }
