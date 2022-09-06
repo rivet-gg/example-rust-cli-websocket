@@ -2,14 +2,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures_util::{
-    future::Either as FutureEither,
     stream::{SplitSink, SplitStream},
-    FutureExt, Sink, SinkExt, StreamExt, TryStreamExt,
+    SinkExt, StreamExt, TryStreamExt,
 };
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt},
-    sync::{broadcast, Notify},
-};
+use tokio::{io::AsyncBufReadExt, sync::Notify};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 type MyWebSocketStream = WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;

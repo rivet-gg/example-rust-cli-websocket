@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
 use futures_util::{
-    future,
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt, TryStreamExt,
 };
