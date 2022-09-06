@@ -70,16 +70,18 @@ async fn main() -> Result<()> {
     let write_stdout_fut = tokio::spawn(write_stdout(read, notify.clone()));
 
     // Wait for any future to finish/exit
-    futures_util::future::select_all([listen_ctrl_c_wait, read_stdin_fut, write_stdout_fut]).await;
-    println!("Shutting down");
-    notify.notify_waiters();
+    futures_util::future::join_all([listen_ctrl_c_wait, read_stdin_fut, write_stdout_fut]).await;
+    println!("All tasks shut down");
 
-    Ok(())
+    // Force exit since `read_line` future cannot be cancelled.
+    std::process::exit(0);
 }
 
 async fn listen_ctrl_c(notify: Arc<Notify>) -> Result<()> {
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
+        _ = tokio::signal::ctrl_c() => {
+            notify.notify_waiters();
+        }
         _ = notify.notified() => {}
     }
     Ok(())
@@ -99,10 +101,12 @@ async fn read_stdin(
                     sink.send(Message::text(line)).await?;
                 } else {
                     println!("No more lines");
+                    notify.notify_waiters();
                     break;
                 }
             }
             _ = notify.notified() => {
+                sink.send(Message::Close(None)).await?;
                 break;
             }
         }
@@ -118,9 +122,10 @@ async fn write_stdout(
         tokio::select! {
             res = stream.try_next() => {
                 if let Some(msg) = res? {
-                    println!("Message: {:?}", msg);
+                    println!("Received: {:?}", msg);
                 } else {
                     println!("Socket closed");
+                    notify.notify_waiters();
                     break;
                 }
             }

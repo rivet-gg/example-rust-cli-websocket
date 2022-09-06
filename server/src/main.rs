@@ -106,7 +106,7 @@ async fn read_messages(
     read: &mut SplitStream<MyWebSocketStream>,
 ) -> Result<()> {
     while let Some(msg) = read.try_next().await? {
-        println!("{addr}: {msg:?}");
+        println!("{addr}: Received {msg:?}");
         write.send(msg).await?;
     }
 
